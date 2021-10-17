@@ -3,12 +3,16 @@ import
   std/[strutils, strformat, macros],
   pkg/futhark
 
-proc makeTypeName(s: string): string =
-  var upper = true
+const debug = defined(DebugJackRenaming)
+
+proc makeTypeName(s: string, capitalize=false): string =
+  var upper = capitalize
   for i, c in s:
     case c:
     of '_':
       upper = true
+    of {'0'..'9'}:
+      result &= c
     of {'a'..'z'}:
       result &= (if upper: c.toUpperAscii() else: c)
       upper = false
@@ -21,38 +25,51 @@ proc makeTypeName(s: string): string =
 proc renameCb(name: string, kind: string, partof = ""): string =
   result = name
 
-  if kind == "typedef" and name.endsWith("_t"):
-    result = name[0..^3].makeTypeName()
-  elif kind == "enumval" or kind == "enum":
-    result = name.makeTypeName()
+  if name.startsWith("__"):
+    when debug: echo &">>> Skipping {name} ({kind})"
+    return name
 
-  if name != result:
-    echo &">>> Renamed {name} to {result} ({kind})"
+  if name.toLowerAscii().startsWith("jack_"): result = name[5..^1]
+  elif name.toLowerAscii().startsWith("jack"): result = name[4..^1]
+  elif name.toLowerAscii().startsWith("_jack"): result = name[5..^1]
+
+  if result.endsWith("_t"): result = result[0..^3]
+
+  if kind in ["typedef", "enumval", "enum"]:
+    result = result.makeTypeName(capitalize=true)
   else:
-    echo &">>> Not renaming {name} ({kind})"
+    result = result.makeTypeName(capitalize=false)
+
+  when debug:
+    if name != result:
+      echo &">>> Renamed {name} to {result} ({kind})"
+    else:
+      echo &">>> Did not rename {name} ({kind})"
 
 importc:
   renameCallback renameCb
-  path "../headers"
+  absPath "/usr/include/jack/"
   "jack.h"
   "midiport.h"
+  "control.h"
+  "metadata.h"
+  "ringbuffer.h"
+  "statistics.h"
+  "uuid.h"
+  "weakmacros.h"
+  "intclient.h"
+  "jslist.h"
+  "session.h"
+  "thread.h"
+  "types.h"
+  "weakjack.h"
+  # "transport.h" - seems to have an error in parsing
 
 static:
   {.passc: gorge("pkg-config --cflags jack").}
   {.passl: gorge("pkg-config --libs jack").}
 
 const
-   JACK_DEFAULT_AUDIO_TYPE* = "32 bit float mono audio"
-   JACK_DEFAULT_MIDI_TYPE* = "8 bit raw midi"
-   JACK_MAX_FRAMES* = (4294967295U)
-   JACK_LOAD_INIT_LIMIT* = 1024
-   THREAD_STACK* = 524288
-   JACK_PARAM_STRING_MAX* = 127
-
-type
-  JackPortFlags* = enum
-    JackPortIsInput = 0x1,
-    JackPortIsOutput = 0x2,
-    JackPortIsPhysical = 0x4,
-    JackPortCanMonitor = 0x8,
-    JackPortIsTerminal = 0x10
+  DEFAULT_AUDIO_TYPE* = "32 bit float mono audio"
+  DEFAULT_MIDI_TYPE* = "8 bit raw midi"
+  MAX_FRAMES* = (4294967295U)
